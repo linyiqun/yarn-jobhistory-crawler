@@ -13,29 +13,14 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
 public class ParseThread extends Thread{
+	private HiveSqlAnalyseTool tool;
 	private LinkedList<FileStatus> fileStatus;
 	private HashMap<String, String[]> dataInfos;
 	
-	public ParseThread(LinkedList<FileStatus> fileStatus, HashMap<String, String[]> dataInfos){
+	public ParseThread(HiveSqlAnalyseTool tool, LinkedList<FileStatus> fileStatus, HashMap<String, String[]> dataInfos){
+		this.tool = tool;
 		this.fileStatus = fileStatus;
 		this.dataInfos = dataInfos;
-	}
-	
-	private synchronized FileStatus getOneFile(){
-		FileStatus fs;
-		
-		fs = null;
-		if(fileStatus != null & fileStatus.size() > 0){
-			fs = fileStatus.poll();
-		}
-		
-		return fs;
-	}
-	
-	private synchronized void addDataToMap(String jobId, String[] values){
-		if(dataInfos != null){
-			dataInfos.put(jobId, values);
-		}
 	}
 	
 	@Override
@@ -43,7 +28,7 @@ public class ParseThread extends Thread{
 		FileStatus fs;
 		
 		while(fileStatus != null && !fileStatus.isEmpty()){
-			fs = getOneFile();
+			fs = tool.getOneFile();
 			parseFileInfo(fs);
 		}
 		
@@ -51,7 +36,6 @@ public class ParseThread extends Thread{
 	}
 
 	private void parseFileInfo(FileStatus fs) {
-		String resultStr;
 		String str;
 		String username;
 		String fileType;
@@ -76,7 +60,6 @@ public class ParseThread extends Thread{
 		FileSystem fileSystem;
 		InputStream in;
 
-		resultStr = "";
 		fileType = "";
 		hiveSql = "";
 		jobId = "";
@@ -130,7 +113,6 @@ public class ParseThread extends Thread{
 					jobName = str.substring(startPos + xmlNameFlag.length(),
 							endPos);
 				} else if (str.contains("hive.query.string")) {
-					System.out.println(str);
 					hiveSqlFlag = 1;
 
 					hiveSql = str;
@@ -197,7 +179,7 @@ public class ParseThread extends Thread{
 		array[BaseValues.DB_COLUMN_HIVE_SQL_USERNAME] = username;
 		array[BaseValues.DB_COLUMN_HIVE_SQL_HIVE_SQL] = sql;
 
-		addDataToMap(jobId, array);
+		tool.addDataToMap(jobId, array);
 	}
 
 	private void insertJobInfoParseData(String jobId, long launchTime,
@@ -220,7 +202,7 @@ public class ParseThread extends Thread{
 		array[BaseValues.DB_COLUMN_HIVE_SQL_REDUCE_TASK_NUM] = String
 				.valueOf(reduceTaskNum);
 
-		addDataToMap(jobId, array);
+		tool.addDataToMap(jobId, array);
 	}
 
 	private int parseTaskNum(String flag, String jobStr) {
@@ -241,7 +223,6 @@ public class ParseThread extends Thread{
 		tmpStr = tmpStr.substring(startPos + flag.length());
 		endPos = tmpStr.indexOf("}");
 		tmpStr = tmpStr.substring(0, endPos);
-		System.out.println("final str is " + tmpStr);
 		taskNum = Integer.parseInt(tmpStr.split(":")[1]);
 
 		return taskNum;
