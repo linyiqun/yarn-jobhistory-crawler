@@ -34,11 +34,12 @@ public class HiveSqlAnalyseTool {
 	private HashMap<String, String[]> dataInfos;
 	private DbClient dbClient;
 
-	public HiveSqlAnalyseTool(String dirType, String jobHistoryPath, int threadNum) {
+	public HiveSqlAnalyseTool(String dirType, String jobHistoryPath,
+			int threadNum) {
 		this.threadNum = threadNum;
 		this.dirType = dirType;
 		this.jobHistoryPath = jobHistoryPath;
-		
+
 		this.dataInfos = new HashMap<String, String[]>();
 		this.fileStatusList = new LinkedList<FileStatus>();
 		this.dbClient = new DbClient(BaseValues.DB_URL,
@@ -71,18 +72,26 @@ public class HiveSqlAnalyseTool {
 
 		if (files != null) {
 			for (FileStatus fs : files) {
-				//parseFileInfo(fs);
+				// parseFileInfo(fs);
 			}
 			System.out.println("files num is " + files.size());
-			System.out.println("fileStatusList size is" + fileStatusList.size());
-			
-			ParseThread thread;
-			for(int i=0; i<threadNum; i++){
+			System.out
+					.println("fileStatusList size is" + fileStatusList.size());
+
+			ParseThread[] threads;
+			threads = new ParseThread[threadNum];
+			for (int i = 0; i < threadNum; i++) {
 				System.out.println("thread " + i + "start run");
-				thread = new ParseThread(fileStatusList, dataInfos);
-				thread.start();
+				threads[i] = new ParseThread(this, fileStatusList, dataInfos);
+				threads[i].start();
+			}
+
+			for (int i = 0; i < threadNum; i++) {
+				System.out.println("thread " + i + "join run");
 				try {
-					thread.join();
+					if (threads[i] != null) {
+						threads[i].join();
+					}
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -104,7 +113,6 @@ public class HiveSqlAnalyseTool {
 			while (fileStatusIter.hasNext()) {
 				FileStatus fileStatus = fileStatusIter.next();
 				Path filePath = fileStatus.getPath();
-				//System.out.println("child file path is " + filePath.getName());
 
 				if (fileStatus.isFile()) {
 					jhStatusList.add(fileStatus);
@@ -116,7 +124,7 @@ public class HiveSqlAnalyseTool {
 		} catch (FileNotFoundException fe) {
 			System.out.println("Error while scanning directory " + path);
 		}
-		
+
 		return jhStatusList;
 	}
 
@@ -175,7 +183,7 @@ public class HiveSqlAnalyseTool {
 
 			endPos = str.indexOf("-");
 			jobId = str.substring(0, endPos);
-		}else{
+		} else {
 			return;
 		}
 
@@ -200,9 +208,7 @@ public class HiveSqlAnalyseTool {
 					jobName = str.substring(startPos + xmlNameFlag.length(),
 							endPos);
 				} else if (str.contains("hive.query.string")) {
-					System.out.println(str);
 					hiveSqlFlag = 1;
-
 					hiveSql = str;
 				} else if (hiveSqlFlag == 1) {
 					hiveSql += str;
@@ -303,15 +309,14 @@ public class HiveSqlAnalyseTool {
 		taskNum = 0;
 		tmpStr = jobStr;
 		startPos = tmpStr.indexOf(flag);
-		
-		if(startPos == -1){
+
+		if (startPos == -1) {
 			return 0;
 		}
-		
+
 		tmpStr = tmpStr.substring(startPos + flag.length());
 		endPos = tmpStr.indexOf("}");
 		tmpStr = tmpStr.substring(0, endPos);
-		System.out.println("final str is " + tmpStr);
 		taskNum = Integer.parseInt(tmpStr.split(":")[1]);
 
 		return taskNum;
@@ -325,12 +330,16 @@ public class HiveSqlAnalyseTool {
 		if (dbClient != null) {
 			dbClient.createConnection();
 		}
-        
-		if(dataInfos != null){
+
+		if (dataInfos != null) {
 			System.out.println("map data size is" + dataInfos.size());
+			
+			if (dbClient != null && dirType.equals("dateTimeDir")) {
+				dbClient.insertDataBatch(dataInfos);
+			}
 		}
-		
-		for (Entry<String, String[]> entry : this.dataInfos.entrySet()) {
+
+		/*for (Entry<String, String[]> entry : this.dataInfos.entrySet()) {
 			jobId = entry.getKey();
 			infos = entry.getValue();
 
@@ -338,15 +347,32 @@ public class HiveSqlAnalyseTool {
 					.format("jobId is %s, jobName:%s, usrname:%s, launchTime:%s, finishTime:%s, mapTaskNum:%s, reduceTaskNum:%s, querySql:%s",
 							jobId, infos[1], infos[2], infos[3], infos[4],
 							infos[5], infos[6], infos[7]);
-			//System.out.println("job detail info " + jobInfo);
+			// System.out.println("job detail info " + jobInfo);
 
 			if (dbClient != null && dirType.equals("dateTimeDir")) {
 				dbClient.insertHiveSqlStatData(infos);
 			}
-		}
+		}*/
 
 		if (dbClient != null) {
 			dbClient.closeConnection();
+		}
+	}
+
+	public synchronized FileStatus getOneFile() {
+		FileStatus fs;
+
+		fs = null;
+		if (fileStatusList != null & fileStatusList.size() > 0) {
+			fs = fileStatusList.poll();
+		}
+
+		return fs;
+	}
+
+	public synchronized void addDataToMap(String jobId, String[] values) {
+		if (dataInfos != null) {
+			dataInfos.put(jobId, values);
 		}
 	}
 }
