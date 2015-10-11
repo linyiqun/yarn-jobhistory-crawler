@@ -1,9 +1,14 @@
 package org.apache.hadoop.mapreduce.v2.hs.tool.sqlanalyse;
 
+import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -15,23 +20,30 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.fs.UnsupportedFileSystemException;
+import org.apache.hadoop.io.IOUtils;
 
 public class HiveSqlAnalyseTool {
+	private int threadNum;
+	private String dirType;
 	private String jobHistoryPath;
 
 	private FileContext doneDirFc;
 	private Path doneDirPrefixPath;
 
+	private LinkedList<FileStatus> fileStatusList;
 	private HashMap<String, String[]> dataInfos;
 	private DbClient dbClient;
 
-	public HiveSqlAnalyseTool(String jobHistoryPath) {
+	public HiveSqlAnalyseTool(String dirType, String jobHistoryPath, int threadNum) {
+		this.threadNum = threadNum;
+		this.dirType = dirType;
 		this.jobHistoryPath = jobHistoryPath;
-
+		
 		this.dataInfos = new HashMap<String, String[]>();
-		// this.dbClient = new DbClient(BaseValues.DB_URL,
-		// BaseValues.DB_USER_NAME, BaseValues.DB_PASSWORD,
-		// BaseValues.DB_HIVE_SQL_STAT_TABLE_NAME);
+		this.fileStatusList = new LinkedList<FileStatus>();
+		this.dbClient = new DbClient(BaseValues.DB_URL,
+				BaseValues.DB_USER_NAME, BaseValues.DB_PASSWORD,
+				BaseValues.DB_HIVE_SQL_STAT_TABLE_NAME);
 
 		try {
 			doneDirPrefixPath = FileContext.getFileContext(new Configuration())
@@ -59,10 +71,23 @@ public class HiveSqlAnalyseTool {
 
 		if (files != null) {
 			for (FileStatus fs : files) {
-				System.out.println("Path is " + fs.getPath().getName());
-				parseFileInfo(fs);
+				//parseFileInfo(fs);
 			}
 			System.out.println("files num is " + files.size());
+			System.out.println("fileStatusList size is" + fileStatusList.size());
+			
+			ParseThread thread;
+			for(int i=0; i<threadNum; i++){
+				System.out.println("thread " + i + "start run");
+				thread = new ParseThread(fileStatusList, dataInfos);
+				thread.start();
+				try {
+					thread.join();
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
 		} else {
 			System.out.println("files is null");
 		}
@@ -70,7 +95,7 @@ public class HiveSqlAnalyseTool {
 		printStatDatas();
 	}
 
-	protected static List<FileStatus> scanDirectory(Path path, FileContext fc,
+	protected List<FileStatus> scanDirectory(Path path, FileContext fc,
 			List<FileStatus> jhStatusList) throws IOException {
 		path = fc.makeQualified(path);
 		System.out.println("dir path is " + path.getName());
@@ -79,10 +104,11 @@ public class HiveSqlAnalyseTool {
 			while (fileStatusIter.hasNext()) {
 				FileStatus fileStatus = fileStatusIter.next();
 				Path filePath = fileStatus.getPath();
-				System.out.println("child file path is " + filePath.getName());
+				//System.out.println("child file path is " + filePath.getName());
 
 				if (fileStatus.isFile()) {
 					jhStatusList.add(fileStatus);
+					fileStatusList.add(fileStatus);
 				} else if (fileStatus.isDirectory()) {
 					scanDirectory(filePath, fc, jhStatusList);
 				}
@@ -90,39 +116,52 @@ public class HiveSqlAnalyseTool {
 		} catch (FileNotFoundException fe) {
 			System.out.println("Error while scanning directory " + path);
 		}
+		
 		return jhStatusList;
 	}
 
-	private String parseFileInfo(FileStatus fs) {
+	private void parseFileInfo(FileStatus fs) {
 		String resultStr;
 		String str;
 		String username;
 		String fileType;
 		String jobId;
+		String jobName;
 		String hiveSql;
 
 		int startPos;
 		int endPos;
+		int hiveSqlFlag;
 		long launchTime;
 		long finishTime;
-		String usernameFlag;
+		int mapTaskNum;
+		int reduceTaskNum;
+		String xmlNameFlag;
 		String launchTimeFlag;
 		String finishTimeFlag;
+		String launchMapFlag;
+		String launchReduceFlag;
 
 		Path path;
 		FileSystem fileSystem;
-		FSDataInputStream in;
+		InputStream in;
 
 		resultStr = "";
 		fileType = "";
 		hiveSql = "";
 		jobId = "";
+		jobName = "";
 		username = "";
+		hiveSqlFlag = 0;
 		launchTime = 0;
 		finishTime = 0;
-		usernameFlag = "<value>";
+		mapTaskNum = 0;
+		reduceTaskNum = 0;
+		xmlNameFlag = "<value>";
 		launchTimeFlag = "\"launchTime\":";
 		finishTimeFlag = "\"finishTime\":";
+		launchMapFlag = "\"Launched map tasks\"";
+		launchReduceFlag = "\"Launched reduce tasks\"";
 
 		path = fs.getPath();
 		str = path.getName();
@@ -136,44 +175,67 @@ public class HiveSqlAnalyseTool {
 
 			endPos = str.indexOf("-");
 			jobId = str.substring(0, endPos);
+		}else{
+			return;
 		}
 
 		try {
 			fileSystem = path.getFileSystem(new Configuration());
 			in = fileSystem.open(path);
+			InputStreamReader isr;
+			BufferedReader br;
 
-			while ((str = in.readLine()) != null) {
+			isr = new InputStreamReader(in, "UTF-8");
+			br = new BufferedReader(isr);
+
+			while ((str = br.readLine()) != null) {
 				if (str.contains("mapreduce.job.user.name")) {
-					System.out.println(str);
-					startPos = str.indexOf(usernameFlag);
+					startPos = str.indexOf(xmlNameFlag);
 					endPos = str.indexOf("</value>");
-					username = str.substring(startPos + usernameFlag.length(),
+					username = str.substring(startPos + xmlNameFlag.length(),
+							endPos);
+				} else if (str.contains("mapreduce.job.name")) {
+					startPos = str.indexOf(xmlNameFlag);
+					endPos = str.indexOf("</value>");
+					jobName = str.substring(startPos + xmlNameFlag.length(),
 							endPos);
 				} else if (str.contains("hive.query.string")) {
 					System.out.println(str);
-					startPos = str.indexOf(usernameFlag);
-					endPos = str.indexOf("</value>");
-					hiveSql = str.substring(startPos + usernameFlag.length(),
-							endPos);
+					hiveSqlFlag = 1;
+
+					hiveSql = str;
+				} else if (hiveSqlFlag == 1) {
+					hiveSql += str;
+
+					if (str.contains("</value>")) {
+						startPos = hiveSql.indexOf(xmlNameFlag);
+						endPos = hiveSql.indexOf("</value>");
+						hiveSql = hiveSql.substring(
+								startPos + xmlNameFlag.length(), endPos);
+
+						hiveSqlFlag = 0;
+					}
 				} else if (str.startsWith("{\"type\":\"JOB_INITED\"")) {
-					System.out.println(str);
 					startPos = str.indexOf(launchTimeFlag);
 					str = str.substring(startPos + launchTimeFlag.length());
-					System.out.println("launch time is " + str);
 					endPos = str.indexOf(",");
 					launchTime = Long.parseLong(str.substring(0, endPos));
 				} else if (str.startsWith("{\"type\":\"JOB_FINISHED\"")) {
-					System.out.println(str);
+					mapTaskNum = parseTaskNum(launchMapFlag, str);
+					reduceTaskNum = parseTaskNum(launchReduceFlag, str);
+
 					startPos = str.indexOf(finishTimeFlag);
 					str = str.substring(startPos + finishTimeFlag.length());
 					endPos = str.indexOf(",");
-					System.out.println("finish time is " + str);
 					finishTime = Long.parseLong(str.substring(0, endPos));
 				}
 			}
 
 			System.out.println("jobId is " + jobId);
+			System.out.println("jobName is " + jobName);
 			System.out.println("username is " + username);
+			System.out.println("map task num is " + mapTaskNum);
+			System.out.println("reduce task num is " + reduceTaskNum);
 			System.out.println("launchTime is " + launchTime);
 			System.out.println("finishTime is " + finishTime);
 			System.out.println("hive query sql is " + hiveSql);
@@ -183,15 +245,15 @@ public class HiveSqlAnalyseTool {
 		}
 
 		if (fileType.equals("config")) {
-			insertConfParseData(jobId, username, hiveSql);
+			insertConfParseData(jobId, jobName, username, hiveSql);
 		} else if (fileType.equals("info")) {
-			insertJobInfoParseData(jobId, launchTime, finishTime);
+			insertJobInfoParseData(jobId, launchTime, finishTime, mapTaskNum,
+					reduceTaskNum);
 		}
-
-		return resultStr;
 	}
 
-	private void insertConfParseData(String jobId, String username, String sql) {
+	private void insertConfParseData(String jobId, String jobName,
+			String username, String sql) {
 		String[] array;
 
 		if (dataInfos.containsKey(jobId)) {
@@ -201,6 +263,7 @@ public class HiveSqlAnalyseTool {
 		}
 
 		array[BaseValues.DB_COLUMN_HIVE_SQL_JOBID] = jobId;
+		array[BaseValues.DB_COLUMN_HIVE_SQL_JOBNAME] = jobName;
 		array[BaseValues.DB_COLUMN_HIVE_SQL_USERNAME] = username;
 		array[BaseValues.DB_COLUMN_HIVE_SQL_HIVE_SQL] = sql;
 
@@ -208,13 +271,13 @@ public class HiveSqlAnalyseTool {
 	}
 
 	private void insertJobInfoParseData(String jobId, long launchTime,
-			long finishedTime) {
+			long finishedTime, int mapTaskNum, int reduceTaskNum) {
 		String[] array;
 
 		if (dataInfos.containsKey(jobId)) {
 			array = dataInfos.get(jobId);
 		} else {
-			array = new String[4];
+			array = new String[BaseValues.DB_COLUMN_HIVE_SQL_LEN];
 		}
 
 		array[BaseValues.DB_COLUMN_HIVE_SQL_JOBID] = jobId;
@@ -222,8 +285,36 @@ public class HiveSqlAnalyseTool {
 				.valueOf(launchTime);
 		array[BaseValues.DB_COLUMN_HIVE_SQL_FINISH_TIME] = String
 				.valueOf(finishedTime);
+		array[BaseValues.DB_COLUMN_HIVE_SQL_MAP_TASK_NUM] = String
+				.valueOf(mapTaskNum);
+		array[BaseValues.DB_COLUMN_HIVE_SQL_REDUCE_TASK_NUM] = String
+				.valueOf(reduceTaskNum);
 
 		dataInfos.put(jobId, array);
+	}
+
+	private int parseTaskNum(String flag, String jobStr) {
+		int taskNum;
+		int startPos;
+		int endPos;
+
+		String tmpStr;
+
+		taskNum = 0;
+		tmpStr = jobStr;
+		startPos = tmpStr.indexOf(flag);
+		
+		if(startPos == -1){
+			return 0;
+		}
+		
+		tmpStr = tmpStr.substring(startPos + flag.length());
+		endPos = tmpStr.indexOf("}");
+		tmpStr = tmpStr.substring(0, endPos);
+		System.out.println("final str is " + tmpStr);
+		taskNum = Integer.parseInt(tmpStr.split(":")[1]);
+
+		return taskNum;
 	}
 
 	private void printStatDatas() {
@@ -234,17 +325,22 @@ public class HiveSqlAnalyseTool {
 		if (dbClient != null) {
 			dbClient.createConnection();
 		}
-
+        
+		if(dataInfos != null){
+			System.out.println("map data size is" + dataInfos.size());
+		}
+		
 		for (Entry<String, String[]> entry : this.dataInfos.entrySet()) {
 			jobId = entry.getKey();
 			infos = entry.getValue();
 
 			jobInfo = String
-					.format("jobId is %s, usrname:%s, launchTime:%s, finishTime:%s, querySql:%s",
-							jobId, infos[1], infos[2], infos[3], infos[4]);
-			System.out.println("job detail info " + jobInfo);
+					.format("jobId is %s, jobName:%s, usrname:%s, launchTime:%s, finishTime:%s, mapTaskNum:%s, reduceTaskNum:%s, querySql:%s",
+							jobId, infos[1], infos[2], infos[3], infos[4],
+							infos[5], infos[6], infos[7]);
+			//System.out.println("job detail info " + jobInfo);
 
-			if (dbClient != null) {
+			if (dbClient != null && dirType.equals("dateTimeDir")) {
 				dbClient.insertHiveSqlStatData(infos);
 			}
 		}
