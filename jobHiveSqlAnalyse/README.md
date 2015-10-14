@@ -8,6 +8,6 @@
 ## 解析线程数
 线程数存在默认值,默认5个解析线程,直接填写数字即可
 
-示例子
-java -jar package-jar dateTimeDir /user/history/done 或
-java -jar package-jar desDir /user/history/done/2015/10/11
+示例
+* java -jar package-jar dateTimeDir /user/history/done -threadnum=10 -writedb=1(后面2个参数可选) 或
+* java -jar package-jar desDir /user/history/done/2015/10/11 -threadnum=10 -writedb=1(后面2个参数可选)
