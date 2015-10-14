@@ -24,6 +24,7 @@ import org.apache.hadoop.io.IOUtils;
 
 public class HiveSqlAnalyseTool {
 	private int threadNum;
+	private int writedb;
 	private String dirType;
 	private String jobHistoryPath;
 
@@ -35,8 +36,9 @@ public class HiveSqlAnalyseTool {
 	private DbClient dbClient;
 
 	public HiveSqlAnalyseTool(String dirType, String jobHistoryPath,
-			int threadNum) {
+			int threadNum, int writedb) {
 		this.threadNum = threadNum;
+		this.writedb = writedb;
 		this.dirType = dirType;
 		this.jobHistoryPath = jobHistoryPath;
 
@@ -332,9 +334,9 @@ public class HiveSqlAnalyseTool {
 		}
 
 		if (dataInfos != null) {
-			System.out.println("map data size is" + dataInfos.size());
+			System.out.println("map data size is" + dataInfos.size() + ", writedb is" + writedb);
 			
-			if (dbClient != null && dirType.equals("dateTimeDir")) {
+			if (dbClient != null && writedb == 1) {
 				dbClient.insertDataBatch(dataInfos);
 			}
 		}
