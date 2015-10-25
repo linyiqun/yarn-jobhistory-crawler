@@ -319,10 +319,6 @@ public class AppController extends Controller implements AMParams {
 		render(confPage());
 	}
 
-	public void allTasks() {
-
-	}
-
 	public void slowTasks() {
 
 	}
