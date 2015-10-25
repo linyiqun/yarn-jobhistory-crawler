@@ -201,10 +201,6 @@ public class HsController extends AppController {
 		render(AggregatedLogsPage.class);
 	}
 
-	public void allTasks() {
-		render(HsAllTasksPage.class);
-	}
-
 	public void slowTasks() {
 		render(HsSlowTasks.class);
 	}
