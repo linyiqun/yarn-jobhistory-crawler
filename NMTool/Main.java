@@ -9,6 +9,9 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
+import mytool.ClusterJspHelper.ClusterStatus;
+import mytool.ClusterJspHelper.NamenodeStatus;
+
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateFormatUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -20,6 +23,8 @@ public class Main {
 	public static void main(String[] args) {
 		int writedb;
 		YarnClient client;
+		ClusterStatus cs; 
+		
 		client = YarnClient.createYarnClient();
 		client.init(new Configuration());
 		client.start();
@@ -46,6 +51,9 @@ public class Main {
 			client.stop();
 			System.out.println("关闭客户端");
 		}
+		
+		cs = new ClusterJspHelper().generateClusterHealthReport();
+		printNameStatusInfo(cs, writedb);
 	}
 
 	/**
@@ -179,5 +187,70 @@ public class Main {
 		DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
 		return df.format(date);
+	}
+	
+	private static void printNameStatusInfo(ClusterStatus cs, int writedb) {
+		double dfsUsedPercent;
+		String[] values;
+		List<NamenodeStatus> nsList;
+		DbClient dbClient;
+
+		if (cs == null || cs.nnList == null) {
+			return;
+		}
+		
+		dbClient = null;
+    if (writedb == 1) {
+      dbClient = new DbClient(BaseValues.DB_URL, BaseValues.DB_USER_NAME,
+          BaseValues.DB_PASSWORD,
+          BaseValues.DB_CLUSTER_STATUS_STAT_TABLE_NAME);
+
+      dbClient.createConnection();
+    }
+    
+		nsList = cs.nnList;
+		for (NamenodeStatus ns : nsList) {
+		  values = new String[BaseValues.DB_COLUMN_CLUSTER_STATUS_LEN];
+			dfsUsedPercent = 1.0 * ns.bpUsed / ns.capacity;
+			
+			System.out.println("host:" + ns.host);
+			System.out.println("blocksCount:" + ns.blocksCount);
+			System.out.println("bpUsed:" + ns.bpUsed);
+			System.out.println("capacity:" + ns.capacity);
+			System.out.println("deadDatanodeCount:" + ns.deadDatanodeCount);
+			System.out.println("deadDecomCount:" + ns.deadDecomCount);
+			System.out.println("filesAndDirectories:" + ns.filesAndDirectories);
+			System.out.println("free:" + ns.free);
+			System.out.println("liveDatanodeCount:" + ns.liveDatanodeCount);
+			System.out.println("liveDecomCount:" + ns.liveDecomCount);
+			System.out.println("missingBlocksCount:" + ns.missingBlocksCount);
+			System.out.println("nonDfsUsed:" + ns.nonDfsUsed);
+			System.out.println("dfsUsedPercent:" + dfsUsedPercent);
+			System.out.println("softwareVersion:" + ns.softwareVersion);
+			
+			values[BaseValues.DB_COLUMN_CLUSTER_STATUS_HOST] = String.valueOf(ns.host);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_BLOCKS_COUNT] = String.valueOf(ns.blocksCount);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_BP_USED] = String.valueOf(ns.bpUsed);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_CAPACITY] = String.valueOf(ns.capacity);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_DEAD_DN_COUNT] = String.valueOf(ns.deadDatanodeCount);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_DEAD_DECOM_COUNT] = String.valueOf(ns.deadDecomCount);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_FILES_AND_DIRS] = String.valueOf(ns.filesAndDirectories);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_FREE] = String.valueOf(ns.free);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_LIVE_DN_COUNT] = String.valueOf(ns.liveDatanodeCount);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_LIVE_DECOM_COUNT] = String.valueOf(ns.liveDecomCount);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_MISSING_BLOCKS_COUNT] = String.valueOf(ns.missingBlocksCount);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_NON_DFS_USED] = String.valueOf(ns.nonDfsUsed);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_DFS_USED_PERCENT] = String.valueOf(dfsUsedPercent);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_SOFT_WARE_VERSION] = String.valueOf(ns.softwareVersion);
+      values[BaseValues.DB_COLUMN_CLUSTER_STATUS_REPORT_TIME] = String.valueOf(getCurrentTime());
+      
+      if(dbClient != null){
+        dbClient.insertCSReportData(values);
+      }
+		}
+		
+		if(dbClient != null){
+		  dbClient.closeConnection();
+		}
 	}
 }
